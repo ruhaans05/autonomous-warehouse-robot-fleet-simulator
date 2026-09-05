@@ -1,5 +1,5 @@
 {
-  "name": "sites-project",
+  "name": "autonomous-warehouse-robot-fleet-simulator",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -9,7 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
-    "lint": "oxlint",
+    "lint": "oxlint app",
     "format": "oxfmt"
   },
   "dependencies": {

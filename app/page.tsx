@@ -240,7 +240,7 @@ function assignTasks(state: SimState, strategy: Strategy): SimState {
   let tasks = [...state.tasks];
   const occupied = state.robots.map((robot) => robot.pos);
   const blocks = blockedSet(state.dynamicBlocks);
-  const robots = state.robots.map((robot) => {
+  const robots: Robot[] = state.robots.map((robot): Robot => {
     if (robot.status !== 'idle') return robot;
     const task = selectTask(robot, tasks, strategy, state.tick);
     if (!task) return robot;
@@ -265,7 +265,7 @@ function assignTasks(state: SimState, strategy: Strategy): SimState {
 }
 
 function advanceState(previous: SimState, strategy: Strategy): SimState {
-  let state = assignTasks(previous, strategy);
+  const state = assignTasks(previous, strategy);
   const blocks = blockedSet(state.dynamicBlocks);
   let tasks = [...state.tasks];
   let collisionAvoidanceEvents = state.collisionAvoidanceEvents;
@@ -279,7 +279,7 @@ function advanceState(previous: SimState, strategy: Strategy): SimState {
     proposals.set(nextKey, [...(proposals.get(nextKey) ?? []), robot.id]);
   }
 
-  const robots = state.robots.map((robot) => {
+  const robots: Robot[] = state.robots.map((robot): Robot => {
     const task = tasks.find((candidate) => candidate.id === robot.taskId);
     if (!task || robot.status === 'idle') return robot;
 
@@ -291,7 +291,7 @@ function advanceState(previous: SimState, strategy: Strategy): SimState {
       return { ...robot, status: 'idle', taskId: undefined, path: [] };
     }
 
-    const target = robot.status === 'to-pick' ? task.pick : task.drop;
+    const target = task.status === 'assigned' ? task.pick : task.drop;
     let path = robot.path;
     let status = robot.status;
 
@@ -342,12 +342,12 @@ function advanceState(previous: SimState, strategy: Strategy): SimState {
       ...robot,
       pos: next,
       path: remaining,
-      status: status === 'replanning' ? status : robot.status,
+      status: status === 'replanning' ? status : task.status === 'assigned' ? 'to-pick' : 'to-drop',
       traveled: robot.traveled + (moved ? 1 : 0),
     };
 
     if (same(next, target)) {
-      if (robot.status === 'to-pick' || status === 'replanning') {
+      if (task.status === 'assigned') {
         const toDrop = pathfind(next, task.drop, blocks, state.robots.map((other) => other.pos)) ?? [];
         tasks = tasks.map((candidate) =>
           candidate.id === task.id
@@ -361,7 +361,7 @@ function advanceState(previous: SimState, strategy: Strategy): SimState {
           plannedDistance: updatedRobot.plannedDistance + toDrop.length,
         };
       }
-      if (robot.status === 'to-drop' && same(next, task.drop)) {
+      if (task.status === 'picked' && same(next, task.drop)) {
         tasks = tasks.map((candidate) =>
           candidate.id === task.id
             ? { ...candidate, status: 'complete', completedAt: state.tick }
