@@ -53,38 +53,219 @@ body {
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: oklch(0.18 0.018 252);
+  --foreground: oklch(0.94 0.012 235);
+  --card: oklch(0.225 0.02 247);
+  --card-foreground: oklch(0.94 0.012 235);
+  --popover: oklch(0.225 0.02 247);
+  --popover-foreground: oklch(0.94 0.012 235);
+  --primary: oklch(0.75 0.13 179);
+  --primary-foreground: oklch(0.17 0.022 240);
+  --secondary: oklch(0.29 0.024 248);
+  --secondary-foreground: oklch(0.9 0.014 235);
+  --muted: oklch(0.28 0.021 248);
+  --muted-foreground: oklch(0.68 0.02 238);
+  --accent: oklch(0.61 0.16 44);
+  --accent-foreground: oklch(0.14 0.02 245);
+  --destructive: oklch(0.66 0.19 24);
+  --border: oklch(0.36 0.028 244);
+  --input: oklch(0.31 0.026 246);
+  --ring: oklch(0.74 0.13 179);
+  --chart-1: oklch(0.73 0.14 180);
+  --chart-2: oklch(0.7 0.15 248);
+  --chart-3: oklch(0.77 0.15 79);
+  --chart-4: oklch(0.68 0.18 18);
+  --chart-5: oklch(0.7 0.16 315);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.2 0.018 252);
+  --sidebar-foreground: oklch(0.94 0.012 235);
+  --sidebar-primary: oklch(0.75 0.13 179);
+  --sidebar-primary-foreground: oklch(0.17 0.022 240);
+  --sidebar-accent: oklch(0.29 0.024 248);
+  --sidebar-accent-foreground: oklch(0.9 0.014 235);
+  --sidebar-border: oklch(0.36 0.028 244);
+  --sidebar-ring: oklch(0.74 0.13 179);
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-border bg-card shadow-[0_18px_60px_rgb(0_0_0/18%)];
+  }
+
+  .metric {
+    @apply min-h-[104px] rounded-lg border border-border bg-card px-4 py-3;
+  }
+
+  .control {
+    @apply inline-flex h-9 items-center gap-2 rounded-md border border-border bg-secondary px-3 text-sm font-medium text-secondary-foreground transition hover:border-primary/70 hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+
+  .segmented {
+    @apply h-8 rounded-md border border-border px-3 text-xs font-semibold capitalize text-muted-foreground transition hover:border-primary/60 hover:text-foreground;
+  }
+
+  .segmented.active {
+    @apply border-primary bg-primary text-primary-foreground;
+  }
+
+  .warehouse-grid {
+    display: grid;
+    grid-template-columns: repeat(16, minmax(28px, 1fr));
+    grid-template-rows: repeat(12, minmax(28px, 1fr));
+    aspect-ratio: 16 / 12;
+    min-height: 420px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background:
+      linear-gradient(to right, oklch(0.35 0.025 246 / 65%) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(0.35 0.025 246 / 65%) 1px, transparent 1px),
+      oklch(0.19 0.02 247);
+    background-size: calc(100% / 16) calc(100% / 12);
+  }
+
+  .cell {
+    @apply relative grid place-items-center overflow-hidden;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .cell.blocked::before {
+    content: '';
+    position: absolute;
+    inset: 14%;
+    border-radius: 3px;
+    background: repeating-linear-gradient(
+      -45deg,
+      oklch(0.33 0.035 70),
+      oklch(0.33 0.035 70) 4px,
+      oklch(0.41 0.045 70) 4px,
+      oklch(0.41 0.045 70) 8px
+    );
+    opacity: 0.88;
+  }
+
+  .cell.dynamic::before {
+    background: repeating-linear-gradient(
+      -45deg,
+      oklch(0.58 0.17 33),
+      oklch(0.58 0.17 33) 4px,
+      oklch(0.76 0.15 75) 4px,
+      oklch(0.76 0.15 75) 8px
+    );
+  }
+
+  .cell.path::after {
+    content: '';
+    position: absolute;
+    width: 30%;
+    height: 30%;
+    border-radius: 999px;
+    background: oklch(0.74 0.13 179 / 44%);
+  }
+
+  .cell.station {
+    background: oklch(0.26 0.04 184 / 72%);
+  }
+
+  .robot {
+    @apply relative z-10 grid h-[72%] w-[72%] place-items-center rounded-md text-[11px] font-bold text-slate-950 shadow-[0_0_0_2px_rgb(255_255_255/18%),0_8px_18px_rgb(0_0_0/30%)];
+  }
+
+  .task-dot {
+    @apply relative z-10 grid h-6 w-6 place-items-center rounded-full text-xs font-bold text-slate-950;
+  }
+
+  .task-dot.p1 {
+    background: oklch(0.74 0.13 180);
+  }
+
+  .task-dot.p2 {
+    background: oklch(0.77 0.15 79);
+  }
+
+  .task-dot.p3 {
+    background: oklch(0.7 0.18 28);
+  }
+
+  .station-label {
+    @apply relative z-10 text-xs font-bold text-primary;
+  }
+
+  .legend-row {
+    @apply flex h-8 items-center gap-2 text-xs text-muted-foreground;
+  }
+
+  .legend {
+    @apply h-4 w-4 rounded-sm border border-border;
+  }
+
+  .robot-sample {
+    background: #14b8a6;
+  }
+
+  .task-sample {
+    @apply rounded-full;
+    background: oklch(0.77 0.15 79);
+  }
+
+  .station-sample {
+    background: oklch(0.26 0.04 184);
+  }
+
+  .blocked-sample {
+    background: repeating-linear-gradient(-45deg, oklch(0.58 0.17 33), oklch(0.58 0.17 33) 4px, oklch(0.76 0.15 75) 4px, oklch(0.76 0.15 75) 8px);
+  }
+
+  .path-sample {
+    background: oklch(0.74 0.13 179 / 55%);
+  }
+
+  .goal-input {
+    @apply min-h-24 w-full resize-none rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-ring/35;
+  }
+
+  .fleet-row {
+    @apply flex min-h-16 items-center gap-3 rounded-md border border-border bg-secondary/55 p-3;
+  }
+
+  .robot-mini {
+    @apply grid h-10 w-10 shrink-0 place-items-center rounded-md text-xs font-bold text-slate-950;
+  }
+
+  .state-pill {
+    @apply shrink-0 rounded-sm border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground;
+  }
+
+  .state-pill.idle {
+    @apply text-muted-foreground;
+  }
+
+  .state-pill.to-pick,
+  .state-pill.to-drop {
+    @apply border-primary/45 text-primary;
+  }
+
+  .state-pill.waiting,
+  .state-pill.replanning {
+    @apply border-accent/55 text-accent;
+  }
+
+  .queue-table {
+    @apply grid grid-cols-[1.2fr_1fr_1fr_0.7fr] text-sm;
+  }
+
+  .queue-head {
+    @apply border-b border-border bg-secondary/65 px-4 py-2 text-xs font-semibold text-muted-foreground;
+  }
+
+  .queue-cell {
+    @apply border-b border-border/70 px-4 py-2 text-xs text-foreground;
+  }
+
+  .eval-row {
+    @apply flex min-h-20 items-center gap-3 rounded-md border border-border bg-secondary/55 p-3;
+  }
 }
 
 .dark {

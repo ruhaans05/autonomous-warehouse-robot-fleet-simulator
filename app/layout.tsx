@@ -13,7 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Untitled site',
+  title: 'Autonomous Warehouse Robot Fleet Simulator',
+  description:
+    'A web-based multi-robot warehouse simulator with task assignment, path planning, collision avoidance, dynamic replanning, and operations metrics.',
 };
 
 export default function RootLayout({
