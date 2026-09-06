@@ -6,6 +6,7 @@ import {
   Boxes,
   Brain,
   Clock3,
+  Download,
   FastForward,
   Gauge,
   GitBranch,
@@ -23,7 +24,8 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 
 type Point = { x: number; y: number };
-type Strategy = 'balanced' | 'nearest' | 'deadline';
+type Strategy = 'balanced' | 'nearest' | 'deadline' | 'congestion';
+type ScenarioId = 'baseline' | 'rush' | 'closure';
 type TaskStatus = 'queued' | 'assigned' | 'picked' | 'complete' | 'failed';
 type RobotStatus = 'idle' | 'to-pick' | 'to-drop' | 'waiting' | 'replanning';
 
@@ -68,12 +70,55 @@ type SimState = {
   totalReplans: number;
 };
 
+type Scenario = {
+  id: ScenarioId;
+  label: string;
+  description: string;
+  taskCount: number;
+  dynamicBlocks: Point[];
+  priorityOffset: number;
+};
+
 const WIDTH = 16;
 const HEIGHT = 12;
 const PACK_STATIONS = [
   { x: 14, y: 2 },
   { x: 14, y: 5 },
   { x: 14, y: 9 },
+];
+
+const SCENARIOS: Scenario[] = [
+  {
+    id: 'baseline',
+    label: 'Baseline flow',
+    description: 'Steady ecommerce demand with two intermittent aisle restrictions.',
+    taskCount: 8,
+    dynamicBlocks: [{ x: 8, y: 5 }, { x: 10, y: 8 }],
+    priorityOffset: 0,
+  },
+  {
+    id: 'rush',
+    label: 'Rush hour',
+    description: 'High-volume wave release tests dispatch quality and fleet utilization.',
+    taskCount: 16,
+    dynamicBlocks: [{ x: 8, y: 5 }, { x: 10, y: 8 }, { x: 4, y: 4 }],
+    priorityOffset: 1,
+  },
+  {
+    id: 'closure',
+    label: 'Aisle closure',
+    description: 'Multiple closures force route recovery and collision-aware replanning.',
+    taskCount: 10,
+    dynamicBlocks: [
+      { x: 4, y: 4 },
+      { x: 5, y: 4 },
+      { x: 8, y: 5 },
+      { x: 10, y: 8 },
+      { x: 11, y: 7 },
+      { x: 13, y: 6 },
+    ],
+    priorityOffset: 2,
+  },
 ];
 
 const STATIC_BLOCKS = new Set(
@@ -154,15 +199,19 @@ function makeTask(index: number, tick: number, priority = 2): Task {
   };
 }
 
-function createInitialState(): SimState {
+function scenarioFor(id: ScenarioId) {
+  return SCENARIOS.find((scenario) => scenario.id === id) ?? SCENARIOS[0];
+}
+
+function createInitialState(scenarioId: ScenarioId = 'baseline'): SimState {
+  const scenario = scenarioFor(scenarioId);
   return {
     tick: 0,
-    robots: INITIAL_ROBOTS,
-    tasks: Array.from({ length: 8 }, (_, i) => makeTask(i, 0, (i % 3) + 1)),
-    dynamicBlocks: [
-      { x: 8, y: 5 },
-      { x: 10, y: 8 },
-    ],
+    robots: INITIAL_ROBOTS.map((robot) => ({ ...robot, pos: { ...robot.pos }, home: { ...robot.home } })),
+    tasks: Array.from({ length: scenario.taskCount }, (_, i) =>
+      makeTask(i, 0, ((i + scenario.priorityOffset) % 3) + 1),
+    ),
+    dynamicBlocks: scenario.dynamicBlocks.map((block) => ({ ...block })),
     failedTasks: 0,
     collisionAvoidanceEvents: 0,
     totalReplans: 0,
@@ -217,7 +266,7 @@ function blockedSet(dynamicBlocks: Point[]) {
   return new Set([...STATIC_BLOCKS, ...dynamicBlocks.map(key)]);
 }
 
-function selectTask(robot: Robot, tasks: Task[], strategy: Strategy, tick: number) {
+function selectTask(robot: Robot, tasks: Task[], strategy: Strategy, tick: number, dynamicBlocks: Point[]) {
   const queued = tasks.filter((task) => task.status === 'queued');
   if (!queued.length) return undefined;
 
@@ -225,12 +274,15 @@ function selectTask(robot: Robot, tasks: Task[], strategy: Strategy, tick: numbe
     .map((task) => {
       const proximity = dist(robot.pos, task.pick);
       const urgency = Math.max(0, task.deadline - tick);
+      const blockagePenalty = dynamicBlocks.filter((block) => dist(block, task.pick) <= 2).length * 5;
       const score =
         strategy === 'nearest'
           ? proximity
           : strategy === 'deadline'
             ? urgency * 0.9 + proximity * 0.35 - task.priority * 4
-            : proximity * 0.6 + urgency * 0.3 - task.priority * 3;
+            : strategy === 'congestion'
+              ? proximity * 0.8 + blockagePenalty + urgency * 0.15 - task.priority * 3
+              : proximity * 0.6 + urgency * 0.3 - task.priority * 3;
       return { task, score };
     })
     .sort((a, b) => a.score - b.score)[0]?.task;
@@ -242,7 +294,7 @@ function assignTasks(state: SimState, strategy: Strategy): SimState {
   const blocks = blockedSet(state.dynamicBlocks);
   const robots: Robot[] = state.robots.map((robot): Robot => {
     if (robot.status !== 'idle') return robot;
-    const task = selectTask(robot, tasks, strategy, state.tick);
+    const task = selectTask(robot, tasks, strategy, state.tick, state.dynamicBlocks);
     if (!task) return robot;
     const path = pathfind(robot.pos, task.pick, blocks, occupied);
     if (!path) return robot;
@@ -409,45 +461,90 @@ function parseGoal(goal: string, countSeed: number, tick: number) {
   return Array.from({ length: quantity }, (_, i) => makeTask(countSeed + i, tick, priority));
 }
 
+function summarize(state: SimState) {
+  const complete = state.tasks.filter((task) => task.status === 'complete');
+  const active = state.tasks.filter((task) => ['assigned', 'picked'].includes(task.status));
+  const queued = state.tasks.filter((task) => task.status === 'queued');
+  const totalTravel = state.robots.reduce((sum, robot) => sum + robot.traveled, 0);
+  const planned = state.robots.reduce((sum, robot) => sum + robot.plannedDistance, 0);
+  const waiting = state.robots.reduce((sum, robot) => sum + robot.waitingTicks, 0);
+  const latency =
+    complete.reduce((sum, task) => sum + ((task.completedAt ?? state.tick) - task.createdAt), 0) /
+    Math.max(complete.length, 1);
+  const utilization = state.robots.filter((robot) => robot.status !== 'idle').length / state.robots.length;
+
+  return {
+    complete,
+    active,
+    queued,
+    throughput: complete.length,
+    routeEfficiency: Math.round((totalTravel / Math.max(planned, 1)) * 100),
+    congestion: Math.round((waiting / Math.max(state.tick * state.robots.length, 1)) * 100),
+    utilization: Math.round(utilization * 100),
+    latency: Math.round(latency),
+    failed: state.failedTasks,
+    replans: state.totalReplans,
+  };
+}
+
+function benchmarkScenario(scenarioId: ScenarioId, strategy: Strategy) {
+  let replay = createInitialState(scenarioId);
+  for (let tick = 0; tick < 100; tick += 1) {
+    replay = advanceState(replay, strategy);
+    if (replay.tasks.every((task) => task.status === 'complete' || task.status === 'failed')) break;
+  }
+  const metrics = summarize(replay);
+  const completionRate = Math.round((metrics.complete.length / replay.tasks.length) * 100);
+  const score = Math.max(
+    0,
+    Math.min(100, completionRate - metrics.congestion - metrics.failed * 10 + Math.round(metrics.routeEfficiency * 0.08)),
+  );
+  return { strategy, ...metrics, completionRate, score, ticks: replay.tick };
+}
+
+function strategyLabel(strategy: Strategy) {
+  return {
+    balanced: 'Balanced',
+    nearest: 'Nearest',
+    deadline: 'Deadline',
+    congestion: 'Congestion',
+  }[strategy];
+}
+
+function plannerExplanation(strategy: Strategy, state: SimState) {
+  const active = state.robots.filter((robot) => robot.status !== 'idle').length;
+  const blocked = state.dynamicBlocks.length;
+  const focus = {
+    balanced: 'blends proximity, urgency, and priority to spread work across the fleet.',
+    nearest: 'minimizes pickup distance for the next available robot.',
+    deadline: 'prioritizes SLA risk before travel distance.',
+    congestion: 'penalizes picks near blocked aisles before assigning work.',
+  }[strategy];
+  return `${strategyLabel(strategy)} dispatch ${focus} ${active}/5 robots are active and ${blocked} aisle restrictions are in effect.`;
+}
+
 export default function Home() {
   const [state, setState] = useState(createInitialState);
   const [running, setRunning] = useState(true);
   const [strategy, setStrategy] = useState<Strategy>('balanced');
+  const [scenarioId, setScenarioId] = useState<ScenarioId>('baseline');
+  const [speed, setSpeed] = useState<1 | 2 | 4>(1);
   const [goal, setGoal] = useState('Generate 6 urgent ecommerce orders for zone B');
 
   useEffect(() => {
     if (!running) return;
     const interval = window.setInterval(() => {
       setState((current) => advanceState(current, strategy));
-    }, 520);
+    }, 620 / speed);
     return () => window.clearInterval(interval);
-  }, [running, strategy]);
+  }, [running, speed, strategy]);
 
-  const metrics = useMemo(() => {
-    const complete = state.tasks.filter((task) => task.status === 'complete');
-    const active = state.tasks.filter((task) => ['assigned', 'picked'].includes(task.status));
-    const queued = state.tasks.filter((task) => task.status === 'queued');
-    const totalTravel = state.robots.reduce((sum, robot) => sum + robot.traveled, 0);
-    const planned = state.robots.reduce((sum, robot) => sum + robot.plannedDistance, 0);
-    const waiting = state.robots.reduce((sum, robot) => sum + robot.waitingTicks, 0);
-    const latency =
-      complete.reduce((sum, task) => sum + ((task.completedAt ?? state.tick) - task.createdAt), 0) /
-      Math.max(complete.length, 1);
-    const utilization =
-      state.robots.filter((robot) => robot.status !== 'idle').length / state.robots.length;
-    return {
-      complete,
-      active,
-      queued,
-      throughput: complete.length,
-      routeEfficiency: Math.round((totalTravel / Math.max(planned, 1)) * 100),
-      congestion: Math.round((waiting / Math.max(state.tick * state.robots.length, 1)) * 100),
-      utilization: Math.round(utilization * 100),
-      latency: Math.round(latency),
-      failed: state.failedTasks,
-      replans: state.totalReplans,
-    };
-  }, [state]);
+  const metrics = useMemo(() => summarize(state), [state]);
+  const benchmarks = useMemo(
+    () => (['balanced', 'nearest', 'deadline', 'congestion'] as Strategy[]).map((option) => benchmarkScenario(scenarioId, option)),
+    [scenarioId],
+  );
+  const scenario = scenarioFor(scenarioId);
 
   const cells = useMemo(() => {
     const blocks = blockedSet(state.dynamicBlocks);
@@ -477,9 +574,57 @@ export default function Home() {
       ].filter((point) => !STATIC_BLOCKS.has(key(point)));
       return {
         ...current,
-        dynamicBlocks: [...current.dynamicBlocks.slice(-3), candidates[current.tick % candidates.length]],
+        dynamicBlocks: [...current.dynamicBlocks.slice(-5), candidates[current.tick % candidates.length]],
       };
     });
+  }
+
+  function toggleBlock(point: Point) {
+    setState((current) => {
+      const robotPresent = current.robots.some((robot) => same(robot.pos, point));
+      const stationPresent = PACK_STATIONS.some((station) => same(station, point));
+      const taskPresent = current.tasks.some((task) => same(task.pick, point) && ['queued', 'assigned'].includes(task.status));
+      if (STATIC_BLOCKS.has(key(point)) || robotPresent || stationPresent || taskPresent) return current;
+      const exists = current.dynamicBlocks.some((block) => same(block, point));
+      return {
+        ...current,
+        dynamicBlocks: exists
+          ? current.dynamicBlocks.filter((block) => !same(block, point))
+          : [...current.dynamicBlocks, point],
+      };
+    });
+  }
+
+  function loadScenario(nextScenario: ScenarioId) {
+    setScenarioId(nextScenario);
+    setState(createInitialState(nextScenario));
+    setRunning(false);
+  }
+
+  function exportRun() {
+    const report = {
+      generatedAt: new Date().toISOString(),
+      scenario: scenario.label,
+      strategy: strategyLabel(strategy),
+      tick: state.tick,
+      metrics: {
+        throughput: metrics.throughput,
+        routeEfficiency: metrics.routeEfficiency,
+        congestion: metrics.congestion,
+        utilization: metrics.utilization,
+        averageLatency: metrics.latency,
+        replans: metrics.replans,
+        failedTasks: metrics.failed,
+      },
+      robots: state.robots.map(({ id, label, traveled, completed, replans, waitingTicks }) => ({ id, label, traveled, completed, replans, waitingTicks })),
+      tasks: state.tasks,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `warehouse-run-${scenario.id}-tick-${state.tick}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -503,8 +648,41 @@ export default function Home() {
               <RotateCcw size={16} />
               Reset
             </button>
+            <button className="control" onClick={exportRun}>
+              <Download size={16} />
+              Export run
+            </button>
           </div>
         </header>
+
+        <section className="panel grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Scenario library</p>
+            <p className="mt-1 truncate text-sm text-foreground">{scenario.description}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {SCENARIOS.map((candidate) => (
+              <button
+                key={candidate.id}
+                className={`segmented ${scenarioId === candidate.id ? 'active' : ''}`}
+                onClick={() => loadScenario(candidate.id)}
+              >
+                {candidate.label}
+              </button>
+            ))}
+            <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+            {([1, 2, 4] as const).map((option) => (
+              <button
+                key={option}
+                className={`segmented ${speed === option ? 'active' : ''}`}
+                onClick={() => setSpeed(option)}
+                aria-label={`Set simulation speed to ${option} times`}
+              >
+                {option}x
+              </button>
+            ))}
+          </div>
+        </section>
 
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           <Metric icon={Boxes} label="Throughput" value={`${metrics.throughput} orders`} sub={`${metrics.queued.length} queued`} />
@@ -523,13 +701,13 @@ export default function Home() {
                 <p className="text-xs text-muted-foreground">Tick {state.tick} · 16 x 12 grid · static racks plus dynamic blocked aisles</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                {(['balanced', 'nearest', 'deadline'] as Strategy[]).map((option) => (
+                {(['balanced', 'nearest', 'deadline', 'congestion'] as Strategy[]).map((option) => (
                   <button
                     key={option}
                     className={`segmented ${strategy === option ? 'active' : ''}`}
                     onClick={() => setStrategy(option)}
                   >
-                    {option}
+                    {strategyLabel(option)}
                   </button>
                 ))}
               </div>
@@ -538,9 +716,12 @@ export default function Home() {
             <div className="grid gap-4 p-4 2xl:grid-cols-[minmax(620px,1fr)_260px]">
               <div className="warehouse-grid" aria-label="Simulated warehouse grid">
                 {cells.map(({ point, robot, pickTask, drop, blocked, dynamic, path }) => (
-                  <div
+                  <button
                     key={key(point)}
-                    className={`cell ${blocked ? 'blocked' : ''} ${dynamic ? 'dynamic' : ''} ${path ? 'path' : ''} ${drop ? 'station' : ''}`}
+                    className={`cell warehouse-cell ${blocked ? 'blocked' : ''} ${dynamic ? 'dynamic' : ''} ${path ? 'path' : ''} ${drop ? 'station' : ''}`}
+                    onClick={() => toggleBlock(point)}
+                    aria-label={`Warehouse cell ${point.x + 1}, ${point.y + 1}${dynamic ? ', blocked aisle' : ''}`}
+                    title={dynamic ? 'Clear temporary aisle block' : 'Toggle temporary aisle block'}
                   >
                     {robot ? (
                       <span className="robot" style={{ background: robot.color }} title={`${robot.label}: ${statusLabel(robot.status)}`}>
@@ -551,7 +732,7 @@ export default function Home() {
                     ) : drop ? (
                       <span className="station-label">P</span>
                     ) : null}
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -561,6 +742,7 @@ export default function Home() {
                 <div className="legend-row"><span className="legend station-sample" /> pack station</div>
                 <div className="legend-row"><span className="legend blocked-sample" /> racks / blocked aisle</div>
                 <div className="legend-row"><span className="legend path-sample" /> reserved route</div>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Select an open aisle on the map to add or clear a temporary block.</p>
                 <button className="control mt-2 w-full justify-center" onClick={addObstacle}>
                   <TrafficCone size={16} />
                   Block aisle
@@ -573,7 +755,7 @@ export default function Home() {
             </div>
           </div>
 
-          <aside className="grid gap-4 xl:grid-rows-[auto_1fr]">
+          <aside className="grid content-start gap-4">
             <div className="panel p-4">
               <div className="mb-3 flex items-center gap-2">
                 <Brain size={17} />
@@ -593,6 +775,28 @@ export default function Home() {
               <p className="mt-3 text-xs leading-5 text-muted-foreground">
                 Parser extracts batch size and urgency, then feeds deterministic assignment and routing for repeatable evaluation.
               </p>
+            </div>
+
+            <div className="panel p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Activity size={17} />
+                <h2 className="text-sm font-semibold">Planner rationale</h2>
+              </div>
+              <p className="text-sm leading-6 text-muted-foreground">{plannerExplanation(strategy, state)}</p>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-md border border-border bg-secondary/50 px-2 py-2">
+                  <p className="text-lg font-semibold">{state.dynamicBlocks.length}</p>
+                  <p className="text-[10px] uppercase text-muted-foreground">closures</p>
+                </div>
+                <div className="rounded-md border border-border bg-secondary/50 px-2 py-2">
+                  <p className="text-lg font-semibold">{metrics.replans}</p>
+                  <p className="text-[10px] uppercase text-muted-foreground">replans</p>
+                </div>
+                <div className="rounded-md border border-border bg-secondary/50 px-2 py-2">
+                  <p className="text-lg font-semibold">{metrics.failed}</p>
+                  <p className="text-[10px] uppercase text-muted-foreground">failures</p>
+                </div>
+              </div>
             </div>
 
             <div className="panel overflow-hidden">
@@ -622,7 +826,7 @@ export default function Home() {
 
         <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
           <Queue title="Order queue" tasks={state.tasks.filter((task) => task.status !== 'complete' && task.status !== 'failed').slice(0, 8)} />
-          <Evaluation state={state} />
+          <Evaluation benchmarks={benchmarks} scenario={scenario} />
         </section>
       </div>
     </main>
@@ -661,38 +865,48 @@ function Queue({ title, tasks }: { title: string; tasks: Task[] }) {
             <div className="queue-cell">{task.deadline}</div>
           </div>
         ))}
+        {tasks.length === 0 && (
+          <div className="col-span-4 px-4 py-7 text-center text-xs text-muted-foreground">
+            No open orders. Inject work or convert a warehouse goal into a task batch.
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function Evaluation({ state }: { state: SimState }) {
-  const scenarios = [
-    { name: 'Balanced', score: 91, icon: GitBranch },
-    { name: 'Nearest robot', score: 84, icon: FastForward },
-    { name: 'Deadline first', score: 88, icon: Zap },
-    { name: 'Congestion aware', score: 94, icon: Bot },
-  ];
+function Evaluation({ benchmarks, scenario }: { benchmarks: ReturnType<typeof benchmarkScenario>[]; scenario: Scenario }) {
+  const icons = {
+    balanced: GitBranch,
+    nearest: FastForward,
+    deadline: Zap,
+    congestion: Bot,
+  };
   return (
     <div className="panel overflow-hidden">
-      <div className="border-b border-border px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold">Policy eval snapshot</h2>
+        <span className="text-xs text-muted-foreground">100-tick replay: {scenario.label}</span>
       </div>
       <div className="grid gap-2 p-3 sm:grid-cols-2">
-        {scenarios.map(({ name, score, icon: Icon }, index) => (
-          <div key={name} className="eval-row">
+        {benchmarks.map((result) => {
+          const Icon = icons[result.strategy];
+          return (
+          <div key={result.strategy} className="eval-row">
             <Icon size={16} />
             <div className="flex-1">
               <div className="flex justify-between text-sm">
-                <span>{name}</span>
-                <span className="font-semibold">{score - (state.failedTasks + index)}%</span>
+                <span>{strategyLabel(result.strategy)}</span>
+                <span className="font-semibold">{result.score}%</span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                <span className="block h-full rounded-full bg-primary" style={{ width: `${score - (state.failedTasks + index)}%` }} />
+                <span className="block h-full rounded-full bg-primary" style={{ width: `${result.score}%` }} />
               </div>
+              <p className="mt-2 text-xs text-muted-foreground">{result.completionRate}% complete · {result.congestion}% congestion · {result.latency}t avg</p>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -130,6 +130,22 @@ body {
     min-height: 0;
   }
 
+  .warehouse-cell {
+    cursor: crosshair;
+    border: 0;
+    background: transparent;
+    transition: background-color 140ms ease;
+  }
+
+  .warehouse-cell:hover:not(.blocked):not(.station) {
+    background: oklch(0.74 0.13 179 / 12%);
+  }
+
+  .warehouse-cell:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+
   .cell.blocked::before {
     content: '';
     position: absolute;
