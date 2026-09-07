@@ -2,7 +2,7 @@
 
 This is the fastest way to get a feel for the simulator before reading the code.
 
-Watch the real 9-second control-room run: [open the video page](https://ruhaans05.github.io/autonomous-warehouse-robot-fleet-simulator/), which also has a one-click MP4 download.
+Watch the real 9-second control-room run: [open the video page](https://ruhaans05.github.io/autonomous-warehouse-robot-fleet-simulator/), which includes the learned policy scorer and has a one-click MP4 download.
 
 ## 1. Start with a normal fulfillment run
 

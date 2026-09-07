@@ -8,7 +8,7 @@ The browser app is a control-room style simulator. You can add orders, block an 
 
 ## Try it
 
-- Product demo: [watch or download the MP4](https://ruhaans05.github.io/autonomous-warehouse-robot-fleet-simulator/)
+- Product demo: [watch or download the MP4](https://ruhaans05.github.io/autonomous-warehouse-robot-fleet-simulator/) showing live routing, aisle restrictions, and learned policy scoring
 - Screenshot walkthrough: [DEMO.md](./DEMO.md)
 
 ## Run it locally
