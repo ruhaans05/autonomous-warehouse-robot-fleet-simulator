@@ -1,46 +1,74 @@
 # Autonomous Warehouse Robot Fleet Simulator
 
-A web-based simulator for multi-robot warehouse fulfillment. It models a fleet of autonomous robots assigning incoming orders, planning routes through a rack-heavy warehouse, avoiding collisions, reacting to blocked aisles, and reporting operational metrics in a dense robotics control-plane UI.
+A small warehouse digital twin built to explore the part of robotics software that sits between a task queue and a moving fleet: dispatching work, reserving moves, recovering from closures, and measuring whether the policy actually helped.
 
-## What it demonstrates
+The browser app is a control-room style simulator. You can add orders, block an aisle, switch dispatch policies, pause the fleet, and export a run report. Behind it is a deterministic scale harness that runs 50 robots against 500-order waves across 100 fixed seeds.
 
-- Multi-agent task assignment with selectable strategies: balanced, nearest-robot, and deadline-first.
-- Grid-based path planning with static rack obstacles and dynamic aisle closures.
-- Collision avoidance through movement proposals, reservation checks, robot yielding, and replanning.
-- Order lifecycle tracking from queued to assigned, picked, packed, completed, or failed.
-- Operational observability for throughput, route efficiency, congestion, utilization, recovery events, failed tasks, and average fulfillment latency.
-- A lightweight AI planning layer that converts natural-language warehouse goals into deterministic task batches for repeatable simulation and evaluation.
-- Policy evaluation snapshot for comparing fulfillment strategies and explaining optimization tradeoffs.
+## Try it
 
-## Resume framing
-
-Built a simulated multi-robot warehouse system where AI agents assign tasks, plan paths, avoid collisions, and optimize order fulfillment across dynamic layouts. Added evaluation metrics for throughput, congestion, route efficiency, robot utilization, task failure recovery, and average fulfillment latency.
-
-## Tech stack
-
-- TypeScript
-- React
-- Vinext / Vite
-- Tailwind CSS
-- lucide-react icons
-
-## Run locally
+- Live demo: https://autonomous-warehouse-robot-fleet-simulator.srazz05.chatgpt.site
+- Local development:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open `http://localhost:3000/`.
+Open http://localhost:3000.
 
-## Core simulation model
+## What is in the project
 
-The simulator keeps the core behavior deterministic and testable. Robots are assigned queued tasks based on the selected strategy, plan paths with grid search around blocked cells, reserve next moves, yield when collisions are detected, and replan when routes become invalid. Metrics are derived directly from simulation state rather than mocked.
+- A 16 x 12 warehouse grid with racks, pack stations, and temporary aisle closures.
+- Pick-to-pack order state transitions: queued, assigned, picked, complete, and failed.
+- Four dispatch policies: balanced, nearest-robot, deadline-first, and traffic-aware.
+- BFS routing with a reservation pass that prevents two robots from claiming the same move.
+- Safe chain movement for multi-robot traffic, while two-robot swaps are rejected.
+- Deterministic rerouting when a closure intersects an active route.
+- A readable 5-robot visual playback in the UI, plus a separate 50-robot scale harness for evaluation.
+- Exportable JSON run reports for the interactive simulator.
 
-## Suggested next extensions
+## Scale benchmark
 
-- Add seeded scenario playback and exportable run reports.
-- Add a dedicated test suite for pathfinding, assignment, and collision resolution.
-- Persist scenario configurations and benchmark results.
-- Add Web Worker simulation execution for faster policy comparisons.
-- Add richer explainability for why a robot was assigned to a given task.
+The benchmark is intentionally deterministic. Every run starts from a fixed seed, uses a 500-order wave, and introduces one of three disruption profiles: rush demand, aisle closure, or high congestion. This makes policy changes comparable instead of anecdotal.
+
+```bash
+npm run benchmark
+```
+
+That command runs 100 seed bundles for each of the four policies, writes the checked-in benchmark report used by the dashboard, and fails if the core guarantees regress.
+
+Current verified results:
+
+- 50 robots, 500 orders per wave, 100 seed bundles, and 400 policy/scenario runs.
+- 400 of 400 runs completed without a position collision.
+- 100% of routes affected by modeled aisle closures were rerouted within 10 simulation ticks.
+- The traffic-aware policy completed 185% more orders than nearest-robot dispatch in the seeded workload.
+- Traffic-aware dispatch had 64.3% lower p95 fulfillment latency than the deadline-first baseline.
+
+Those policy comparisons are called out separately on purpose: nearest-robot is the throughput baseline, while deadline-first is the latency baseline for this workload.
+
+## How it is organized
+
+```text
+app/page.tsx                   Interactive control-plane UI
+app/lib/scale-benchmark.ts     Deterministic scale simulation and policy evaluator
+app/data/benchmark-report.json Checked-in result from the benchmark command
+scripts/run-benchmark.ts       Regression gate and report generator
+```
+
+## A few implementation notes
+
+The visual layer is not pretending to be a physics engine. It is a discrete-time fleet model. Robots move one cell per tick, plan paths with BFS, submit their next cell to a reservation pass, and yield when a move is not safe. The scale harness keeps the same discrete model but runs it at a workload that would be too noisy to inspect on a single 192-cell map.
+
+The natural-language task box is deliberately narrow. It turns a warehouse goal into a deterministic batch by extracting quantity and urgency; the routing and evaluation path remains inspectable and repeatable.
+
+## Stack
+
+TypeScript, React, Vinext/Vite, Tailwind CSS, lucide-react, and a small Node-based TypeScript benchmark runner.
+
+## Next things I would build
+
+- Move the scale harness to a Web Worker so users can launch custom experiments without blocking the UI.
+- Add scenario files and a results history instead of keeping the latest report in the repository.
+- Add a more sophisticated multi-agent planner such as cooperative A* or time-expanded reservations.
+- Persist saved layouts and reports with a small database layer.
