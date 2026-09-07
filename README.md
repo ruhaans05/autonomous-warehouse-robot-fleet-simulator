@@ -47,6 +47,7 @@ npm run dev -- --port 3001
 - Safe chain movement for multi-robot traffic, while two-robot swaps are rejected.
 - Deterministic rerouting when a closure intersects an active route.
 - A readable 5-robot visual playback in the UI, plus a separate 50-robot scale harness for evaluation.
+- A learned dispatch policy distilled from the traffic-aware task-ranking baseline.
 - Exportable JSON run reports for the interactive simulator.
 
 ## Scale benchmark
@@ -57,29 +58,29 @@ The benchmark is intentionally deterministic. Every run starts from a fixed seed
 npm run benchmark
 ```
 
-That command runs 100 seed bundles for each of the four policies, writes the checked-in benchmark report used by the dashboard, and fails if the core guarantees regress.
+That command runs 100 seed bundles for each of the five policies, writes the checked-in benchmark report used by the dashboard, and fails if the core guarantees regress.
 
 Current verified results:
 
-- 50 robots, 500 orders per wave, 100 seed bundles, and 400 policy/scenario runs.
-- 400 of 400 runs completed without a position collision.
+- 50 robots, 500 orders per wave, 100 seed bundles, and 500 policy/scenario runs.
+- 500 of 500 runs completed without a position collision.
 - 100% of routes affected by modeled aisle closures were rerouted within 10 simulation ticks.
-- The traffic-aware policy completed 185% more orders than nearest-robot dispatch in the seeded workload.
-- Traffic-aware dispatch had 64.3% lower p95 fulfillment latency than the deadline-first baseline.
+- Learned dispatch completed 179% more orders than nearest-robot assignment in the seeded workload.
+- Learned dispatch had 64.4% lower p95 fulfillment latency than the deadline-first baseline.
 
 Those policy comparisons are called out separately on purpose: nearest-robot is the throughput baseline, while deadline-first is the latency baseline for this workload.
 
-## Learned policy scoring
+## Learned dispatch model
 
-The simulator also includes an offline ML experiment that learns an expected utility score for each dispatch policy. It is trained from deterministic simulator rollouts, not from a canned recommendation list.
+The simulator includes a supervised dispatch model that learns to reproduce the traffic-aware task-ranking policy. This is policy distillation: a simple, inspectable model learns a reliable dispatch score from simulator-generated assignment data, then runs inside the task-assignment loop.
 
 ```bash
-npm run train:model
+npm run train:dispatch
 ```
 
-The trainer creates 180 seeded warehouse episodes, holds out 36 of them, and fits a separate ridge-regression scorer for each policy. The state vector includes demand regime, aisle-closure intensity and timing, hot-zone concentration, urgent-order share, deadline slack, and peak pick density. Its target rewards completed orders while penalizing p95 latency and congestion.
+The trainer generates 90,000 robot-to-order assignment examples from 180 seeded scenario contexts, trains on 72,000 examples, and holds out 18,000. A ridge-regression scorer uses pickup distance, pack distance, local demand, urgency, and priority to reproduce the teacher policy. It reaches 99.9% held-out task-ranking agreement.
 
-The checked-in model report lives in `app/data/policy-model-report.json`. In the app, the **Learned policy scorer** ranks all four policies from the current workload and can apply its recommendation. It is deliberately decision support only: BFS routing, move reservations, collision avoidance, and disruption recovery remain deterministic safety mechanisms.
+The checked-in model report lives in `app/data/dispatch-model-report.json`. In the app, **Use learned scorer** activates the trained dispatch strategy. BFS routing, move reservations, collision avoidance, and disruption recovery remain deterministic safety mechanisms.
 
 ## How it is organized
 
@@ -87,17 +88,17 @@ The checked-in model report lives in `app/data/policy-model-report.json`. In the
 app/page.tsx                   Interactive control-plane UI
 app/lib/scale-benchmark.ts     Deterministic scale simulation and policy evaluator
 app/data/benchmark-report.json Checked-in result from the benchmark command
-app/lib/policy-model.ts        Client-side learned policy scoring
-app/data/policy-model-report.json Reproducible trained model artifact
+app/lib/dispatch-model.ts      Client-side learned task scorer
+app/data/dispatch-model-report.json Reproducible trained model artifact
 scripts/run-benchmark.ts       Regression gate and report generator
-scripts/train-policy-model.ts  Offline policy-model training and holdout check
+scripts/train-dispatch-model.ts Offline dispatch-model training and holdout check
 ```
 
 ## A few implementation notes
 
 The visual layer is not pretending to be a physics engine. It is a discrete-time fleet model. Robots move one cell per tick, plan paths with BFS, submit their next cell to a reservation pass, and yield when a move is not safe. The scale harness keeps the same discrete model but runs it at a workload that would be too noisy to inspect on a single 192-cell map.
 
-The natural-language task box is deliberately narrow. It turns a warehouse goal into a deterministic batch by extracting quantity and urgency; the routing and evaluation path remains inspectable and repeatable. The learned policy scorer is a separate supervised-learning experiment with a checked-in model artifact and a holdout split.
+The natural-language task box is deliberately narrow. It turns a warehouse goal into a deterministic batch by extracting quantity and urgency; the routing and evaluation path remains inspectable and repeatable. The learned dispatch scorer is a separate supervised-learning experiment with a checked-in model artifact and a holdout split.
 
 ## Stack
 

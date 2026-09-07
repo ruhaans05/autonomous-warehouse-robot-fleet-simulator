@@ -2,7 +2,7 @@
 
 This is the fastest way to get a feel for the simulator before reading the code.
 
-Watch the real 9-second control-room run: [open the video page](https://ruhaans05.github.io/autonomous-warehouse-robot-fleet-simulator/), which includes the learned policy scorer and has a one-click MP4 download.
+Watch the real control-room run: [open the video page](https://ruhaans05.github.io/autonomous-warehouse-robot-fleet-simulator/), which includes the learned dispatch scorer and has a one-click MP4 download.
 
 ## 1. Start with a normal fulfillment run
 
@@ -18,12 +18,13 @@ Choose **Aisle closure**, press **Run**, and use **Block aisle** or select an op
 
 ## 3. Compare policy behavior
 
-The dispatch controls above the map switch between four policies:
+The dispatch controls above the map switch between five policies:
 
 - **Balanced** combines distance, urgency, and task priority.
 - **Nearest** favors the shortest pickup distance.
 - **Deadline** prioritizes SLA risk.
 - **Congestion** penalizes work near restricted or high-demand areas.
+- **Learned** uses a ridge-regression task scorer distilled from the traffic-aware policy.
 
 The visual playback is deliberately small enough to read. The **Scale validation harness** at the bottom of the app is the separate deterministic evaluator: it runs 50 robots against 500-order waves across 100 fixed seed bundles and reports the checked benchmark outcome.
 
@@ -31,10 +32,10 @@ The visual playback is deliberately small enough to read. The **Scale validation
 
 Type a goal such as `Generate 10 urgent orders for zone C` into the AI planning panel, then select **Convert goal to tasks**. The parser keeps that input deterministic by extracting only the batch size and urgency. You can also inject a single order, switch scenarios, change simulation speed, step one tick at a time, reset the run, or export the current state.
 
-## 5. Inspect a learned policy recommendation
+## 5. Run the learned dispatcher
 
-The **Learned policy scorer** is an offline supervised model trained from seeded simulator episodes. It takes the live workload's demand regime, closure pattern, urgency mix, deadline slack, and pick density, then ranks the four available dispatch policies by predicted utility. Use **Apply recommendation** to switch the visual playback to the top-ranked policy.
+The **Learned dispatch scorer** is a supervised ridge-regression model trained from 72,000 simulated robot-to-order assignments and checked against 18,000 held-out examples. It scores pickup distance, pack distance, local demand, urgency, and priority to reproduce the traffic-aware task-ordering policy. Use **Use learned scorer** to run it in the visual playback.
 
-![Learned policy scorer during a live warehouse run](./public/demo-learned-policy-scorer.jpg)
+![Learned dispatch scorer during a live warehouse run](./public/demo-learned-policy-scorer.jpg)
 
-The recommender does not control movement safety. BFS routing, reservations, collision avoidance, and replanning stay deterministic so the model is a measurable decision-support component rather than an opaque override.
+The learned policy completed 179% more orders than nearest-robot assignment across the seeded scale benchmark. It does not control movement safety: BFS routing, reservations, collision avoidance, and replanning stay deterministic.
