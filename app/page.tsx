@@ -5,6 +5,7 @@ import {
   Bot,
   Boxes,
   Brain,
+  BrainCircuit,
   Clock3,
   Download,
   FastForward,
@@ -23,6 +24,9 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import benchmarkReport from './data/benchmark-report.json';
+import policyModelReport from './data/policy-model-report.json';
+import { type PolicyFeatures } from './lib/policy-features';
+import { predictPolicies, type PolicyModelReport } from './lib/policy-model';
 
 type Point = { x: number; y: number };
 type Strategy = 'balanced' | 'nearest' | 'deadline' | 'congestion';
@@ -524,6 +528,38 @@ function plannerExplanation(strategy: Strategy, state: SimState) {
   return `${strategyLabel(strategy)} dispatch ${focus} ${active}/5 robots are active in the visual playback and ${blocked} aisle restrictions are in effect.`;
 }
 
+function buildPolicyFeatures(state: SimState, scenarioId: ScenarioId): PolicyFeatures {
+  const demandByCell = new Map<string, number>();
+  for (const task of state.tasks) {
+    if (task.status === 'complete' || task.status === 'failed') continue;
+    demandByCell.set(key(task.pick), (demandByCell.get(key(task.pick)) ?? 0) + 1);
+  }
+  const openTasks = state.tasks.filter((task) => task.status !== 'complete' && task.status !== 'failed');
+  const taskCount = Math.max(openTasks.length, 1);
+  const hotZoneShare = openTasks.filter((task) => task.pick.x >= 6 && task.pick.x <= 10 && task.pick.y >= 3 && task.pick.y <= 8).length / taskCount;
+
+  return {
+    rushDemand: scenarioId === 'rush' ? 1 : 0,
+    aisleClosure: scenarioId === 'closure' ? 1 : 0,
+    closureIntensity: Math.min(state.dynamicBlocks.length / 6, 1),
+    closureEarlyness: state.dynamicBlocks.length ? Math.max(0, 1 - state.tick / 110) : 0,
+    hotZoneShare,
+    urgentShare: openTasks.filter((task) => task.priority === 3).length / taskCount,
+    meanDeadlineSlack: openTasks.reduce((total, task) => total + Math.max(0, task.deadline - state.tick), 0) / taskCount / 100,
+    peakDemandShare: Math.max(0, ...demandByCell.values()) / taskCount,
+  };
+}
+
+function policySignals(features: PolicyFeatures) {
+  const signals = [];
+  if (features.rushDemand) signals.push('rush demand');
+  if (features.aisleClosure) signals.push('closure recovery');
+  if (features.closureIntensity >= 0.65) signals.push('dense aisle restrictions');
+  if (features.urgentShare >= 0.3) signals.push('urgent-order mix');
+  if (!signals.length) signals.push('steady flow');
+  return signals.join(' · ');
+}
+
 export default function Home() {
   const [state, setState] = useState(createInitialState);
   const [running, setRunning] = useState(true);
@@ -546,6 +582,11 @@ export default function Home() {
     [scenarioId],
   );
   const scenario = scenarioFor(scenarioId);
+  const learnedFeatures = useMemo(() => buildPolicyFeatures(state, scenarioId), [state, scenarioId]);
+  const learnedPolicy = useMemo(
+    () => predictPolicies(policyModelReport as PolicyModelReport, learnedFeatures),
+    [learnedFeatures],
+  );
 
   const cells = useMemo(() => {
     const blocks = blockedSet(state.dynamicBlocks);
@@ -778,6 +819,12 @@ export default function Home() {
               </p>
             </div>
 
+            <LearnedPolicyPanel
+              features={learnedFeatures}
+              prediction={learnedPolicy}
+              onApply={() => setStrategy(learnedPolicy.recommended.strategy)}
+            />
+
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-2">
                 <Activity size={17} />
@@ -911,6 +958,56 @@ function Evaluation({ benchmarks, scenario }: { benchmarks: ReturnType<typeof be
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function LearnedPolicyPanel({
+  features,
+  prediction,
+  onApply,
+}: {
+  features: PolicyFeatures;
+  prediction: ReturnType<typeof predictPolicies>;
+  onApply: () => void;
+}) {
+  return (
+    <div className="panel p-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <BrainCircuit size={17} />
+          <h2 className="text-sm font-semibold">Learned policy scorer</h2>
+        </div>
+        <span className="state-pill replanning">Offline ML</span>
+      </div>
+      <p className="text-sm leading-6 text-muted-foreground">
+        Recommends <span className="font-semibold text-foreground">{strategyLabel(prediction.recommended.strategy)}</span> from {policySignals(features)}.
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-md border border-border bg-secondary/50 px-3 py-2">
+          <p className="text-[10px] uppercase text-muted-foreground">Predicted utility</p>
+          <p className="mt-1 text-lg font-semibold">{prediction.recommended.score.toFixed(1)}</p>
+        </div>
+        <div className="rounded-md border border-border bg-secondary/50 px-3 py-2">
+          <p className="text-[10px] uppercase text-muted-foreground">Top-two margin</p>
+          <p className="mt-1 text-lg font-semibold">+{prediction.margin.toFixed(1)}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-1.5">
+        {prediction.predictions.map((candidate) => (
+          <div key={candidate.strategy} className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{strategyLabel(candidate.strategy)}</span>
+            <span className={candidate.strategy === prediction.recommended.strategy ? 'font-semibold text-primary' : ''}>{candidate.score.toFixed(1)}</span>
+          </div>
+        ))}
+      </div>
+      <button className="control mt-3 w-full justify-center" onClick={onApply}>
+        <Brain size={16} />
+        Apply recommendation
+      </button>
+      <p className="mt-3 text-xs leading-5 text-muted-foreground">
+        {policyModelReport.trainingEpisodes} training episodes · {policyModelReport.holdoutEpisodes} held-out episodes · regularized regression over demand, urgency, and closure features.
+      </p>
     </div>
   );
 }
