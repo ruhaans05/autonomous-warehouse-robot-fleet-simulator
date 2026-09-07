@@ -11,7 +11,8 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint app",
     "format": "oxfmt",
-    "benchmark": "tsx scripts/run-benchmark.ts"
+    "benchmark": "tsx scripts/run-benchmark.ts",
+    "train:model": "tsx scripts/train-policy-model.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

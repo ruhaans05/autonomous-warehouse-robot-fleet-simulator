@@ -1,3 +1,5 @@
+import { type PolicyFeatures } from './policy-features';
+
 export type ScaleStrategy = 'balanced' | 'nearest' | 'deadline' | 'congestion';
 export type ScaleScenarioId = 'rush-demand' | 'aisle-closure' | 'high-congestion';
 
@@ -189,6 +191,26 @@ function createOrders(seed: number, scenario: ScaleScenarioId) {
       createdAt: 0,
     };
   });
+}
+
+export function describeSeededEpisode(seed: number, scenario: ScaleScenarioId): PolicyFeatures {
+  const config = SCENARIOS[scenario];
+  const orders = createOrders(seed, scenario);
+  const demandByCell = new Map<number, number>();
+  for (const order of orders) {
+    demandByCell.set(order.pick, (demandByCell.get(order.pick) ?? 0) + 1);
+  }
+
+  return {
+    rushDemand: scenario === 'rush-demand' ? 1 : 0,
+    aisleClosure: scenario === 'aisle-closure' ? 1 : 0,
+    closureIntensity: config.closureCells.length / 6,
+    closureEarlyness: (HORIZON - config.closureTick) / HORIZON,
+    hotZoneShare: orders.filter((order) => config.hotZone.includes(order.pick)).length / orders.length,
+    urgentShare: orders.filter((order) => order.priority === 3).length / orders.length,
+    meanDeadlineSlack: orders.reduce((total, order) => total + order.deadline, 0) / orders.length / 100,
+    peakDemandShare: Math.max(...demandByCell.values()) / orders.length,
+  };
 }
 
 function localDemand(cell: number, demandByCell: Map<number, number>, blocks: Set<number>) {
