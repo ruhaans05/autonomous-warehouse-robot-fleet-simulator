@@ -7,14 +7,34 @@ The browser app is a control-room style simulator. You can add orders, block an 
 ## Try it
 
 - Live demo: https://autonomous-warehouse-robot-fleet-simulator.srazz05.chatgpt.site
-- Local development:
+- Screenshot walkthrough: [DEMO.md](./DEMO.md)
+
+## Run it locally
+
+You only need a recent version of Node.js (22 or newer) and a terminal.
+
+1. Download or clone this repository.
+2. In the project folder, install the packages:
 
 ```bash
 npm install
+```
+
+3. Start the app:
+
+```bash
 npm run dev
 ```
 
-Open http://localhost:3000.
+4. Open the local URL printed in the terminal. It is usually http://localhost:3000.
+
+For a quick first run, leave the **Baseline flow** scenario selected, click **Run**, then click **Block aisle** once the robots are moving. Try the dispatch buttons above the map to see how the routing choices differ. **Export run** downloads the current simulator state as JSON.
+
+If another app is already using port 3000, start this app on a different port instead:
+
+```bash
+npm run dev -- --port 3001
+```
 
 ## What is in the project
 
