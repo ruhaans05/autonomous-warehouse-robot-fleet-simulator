@@ -2,6 +2,8 @@
 
 This is the fastest way to get a feel for the simulator before reading the code.
 
+Watch the real 9-second control-room run: [open in your browser](https://raw.githubusercontent.com/ruhaans05/autonomous-warehouse-robot-fleet-simulator/main/public/warehouse-fleet-demo.mp4) or [download the MP4](https://github.com/ruhaans05/autonomous-warehouse-robot-fleet-simulator/raw/refs/heads/main/public/warehouse-fleet-demo.mp4?download=1).
+
 ## 1. Start with a normal fulfillment run
 
 Choose **Baseline flow** and let the fleet run. The top row is the quick health check: throughput, route efficiency, congestion, utilization, fulfillment latency, and recovery events. The grid is the visual playback; colored squares are robots, numbered circles are pick tasks, and `P` cells are pack stations.
