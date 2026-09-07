@@ -1,8 +1,10 @@
 # Autonomous Warehouse Robot Fleet Simulator
 
-A small warehouse digital twin built to explore the part of robotics software that sits between a task queue and a moving fleet: dispatching work, reserving moves, recovering from closures, and measuring whether the policy actually helped.
+Modern fulfillment centers succeed or fail on coordination: a locally sensible robot decision can turn into blocked aisles, missed order windows, and cascading delays once dozens of robots share the same floor. This project is a deterministic warehouse digital twin for testing that coordination layer before it reaches a live fleet.
 
-The browser app is a control-room style simulator. You can add orders, block an aisle, switch dispatch policies, pause the fleet, and export a run report. Behind it is a deterministic scale harness that runs 50 robots against 500-order waves across 100 fixed seeds.
+It models the decisions that turn a task queue into reliable physical execution: dispatching work across competing robots, reserving moves, preventing collisions, rerouting around aisle closures, and proving with repeatable evaluation whether a policy improves throughput or latency. The checked-in scale harness runs 50 robots against 500-order waves over 100 fixed seeds, so changes are judged by measured outcomes rather than a single attractive playback.
+
+The browser app is a control-room style simulator. You can add orders, block an aisle, switch dispatch policies, pause the fleet, and export a run report.
 
 ## Try it
 
