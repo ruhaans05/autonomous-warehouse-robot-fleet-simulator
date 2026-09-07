@@ -4,8 +4,10 @@ import { writeFileSync } from 'node:fs';
 const summary = runBenchmarkSuite(100);
 console.log(JSON.stringify(summary, null, 2));
 
-if (summary.zeroCollisionRuns !== 400) {
-  throw new Error(`Expected 400 collision-free policy runs, received ${summary.zeroCollisionRuns}.`);
+const expectedPolicyRuns = summary.runs * 5;
+
+if (summary.zeroCollisionRuns !== expectedPolicyRuns) {
+  throw new Error(`Expected ${expectedPolicyRuns} collision-free policy runs, received ${summary.zeroCollisionRuns}.`);
 }
 
 if (summary.recoveryRate < 95) {

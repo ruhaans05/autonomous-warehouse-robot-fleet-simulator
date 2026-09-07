@@ -2,14 +2,15 @@
   "runs": 100,
   "robotCount": 50,
   "orderCount": 500,
-  "zeroCollisionRuns": 400,
+  "zeroCollisionRuns": 500,
   "recoveryRate": 100,
   "congestionCompletedOrders": 2.6,
+  "learnedCompletedOrders": 2.5,
   "nearestCompletedOrders": 0.7,
-  "completionLift": 185,
+  "completionLift": 179,
   "congestionP95Latency": 10.5,
   "deadlineP95Latency": 29.6,
-  "p95Reduction": 64.3,
+  "p95Reduction": 64.4,
   "strategies": [
     {
       "strategy": "balanced",
@@ -35,6 +36,13 @@
     {
       "strategy": "congestion",
       "completedOrders": 2.6,
+      "p95Latency": 10.5,
+      "recoveryRate": 100,
+      "collisionCount": 0
+    },
+    {
+      "strategy": "learned",
+      "completedOrders": 2.5,
       "p95Latency": 10.5,
       "recoveryRate": 100,
       "collisionCount": 0

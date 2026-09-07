@@ -1,6 +1,7 @@
-import { type PolicyFeatures } from './policy-features';
+import { learnedDispatchScore } from './dispatch-model';
+import { trafficAwareScore, type DispatchFeatures } from './dispatch-features';
 
-export type ScaleStrategy = 'balanced' | 'nearest' | 'deadline' | 'congestion';
+export type ScaleStrategy = 'balanced' | 'nearest' | 'deadline' | 'congestion' | 'learned';
 export type ScaleScenarioId = 'rush-demand' | 'aisle-closure' | 'high-congestion';
 
 type Robot = {
@@ -47,6 +48,7 @@ export type BenchmarkSummary = {
   zeroCollisionRuns: number;
   recoveryRate: number;
   congestionCompletedOrders: number;
+  learnedCompletedOrders: number;
   nearestCompletedOrders: number;
   completionLift: number;
   congestionP95Latency: number;
@@ -193,26 +195,6 @@ function createOrders(seed: number, scenario: ScaleScenarioId) {
   });
 }
 
-export function describeSeededEpisode(seed: number, scenario: ScaleScenarioId): PolicyFeatures {
-  const config = SCENARIOS[scenario];
-  const orders = createOrders(seed, scenario);
-  const demandByCell = new Map<number, number>();
-  for (const order of orders) {
-    demandByCell.set(order.pick, (demandByCell.get(order.pick) ?? 0) + 1);
-  }
-
-  return {
-    rushDemand: scenario === 'rush-demand' ? 1 : 0,
-    aisleClosure: scenario === 'aisle-closure' ? 1 : 0,
-    closureIntensity: config.closureCells.length / 6,
-    closureEarlyness: (HORIZON - config.closureTick) / HORIZON,
-    hotZoneShare: orders.filter((order) => config.hotZone.includes(order.pick)).length / orders.length,
-    urgentShare: orders.filter((order) => order.priority === 3).length / orders.length,
-    meanDeadlineSlack: orders.reduce((total, order) => total + order.deadline, 0) / orders.length / 100,
-    peakDemandShare: Math.max(...demandByCell.values()) / orders.length,
-  };
-}
-
 function localDemand(cell: number, demandByCell: Map<number, number>, blocks: Set<number>) {
   const nearbyDemand = Array.from(demandByCell.entries()).reduce(
     (total, [pick, count]) => total + (distance(cell, pick) <= 2 ? count : 0),
@@ -221,21 +203,50 @@ function localDemand(cell: number, demandByCell: Map<number, number>, blocks: Se
   return nearbyDemand + neighbors(cell).filter((neighbor) => blocks.has(neighbor)).length * 7;
 }
 
+function dispatchFeatures(robot: Robot, order: Order, tick: number, density: number): DispatchFeatures {
+  return {
+    pickupDistance: distance(robot.pos, order.pick),
+    dropDistance: distance(order.pick, order.drop),
+    localDemand: density,
+    urgency: Math.max(0, order.deadline - tick),
+    priority: order.priority,
+  };
+}
+
+export function createDispatchTrainingExamples(seed: number, scenario: ScaleScenarioId) {
+  const robots = createRobots(seed);
+  const orders = createOrders(seed, scenario);
+  const demandByCell = new Map<number, number>();
+  for (const order of orders) demandByCell.set(order.pick, (demandByCell.get(order.pick) ?? 0) + 1);
+  const densityByCell = new Map(
+    Array.from(demandByCell.keys()).map((cell) => [cell, localDemand(cell, demandByCell, STATIC_BLOCKS)]),
+  );
+  return robots.flatMap((robot) =>
+    Array.from({ length: 10 }, (_, offset) => {
+      const order = orders[(robot.id * 37 + offset * 41 + seed) % orders.length];
+      const features = dispatchFeatures(robot, order, 0, densityByCell.get(order.pick) ?? 0);
+      return { features, target: trafficAwareScore(features), group: `${scenario}-${seed}-${robot.id}` };
+    }),
+  );
+}
+
 function selectOrder(robot: Robot, orders: Order[], strategy: ScaleStrategy, tick: number, densityByCell: Map<number, number>) {
   let selected: Order | undefined;
   let bestScore = Number.POSITIVE_INFINITY;
 
   for (const order of orders) {
     if (order.state !== 'queued') continue;
-    const pickupDistance = distance(robot.pos, order.pick);
-    const urgency = Math.max(0, order.deadline - tick);
     const density = densityByCell.get(order.pick) ?? 0;
+    const features = dispatchFeatures(robot, order, tick, density);
+    const { pickupDistance, urgency } = features;
     const score = strategy === 'nearest'
       ? pickupDistance - order.priority * 0.2
       : strategy === 'deadline'
         ? urgency * 0.85 + pickupDistance * 0.35 - order.priority * 9
         : strategy === 'congestion'
-          ? pickupDistance * 0.42 + distance(order.pick, order.drop) * 0.58 + density * 0.06 + urgency * 0.03 - order.priority * 7
+          ? trafficAwareScore(features)
+          : strategy === 'learned'
+            ? learnedDispatchScore(features)
           : pickupDistance * 0.55 + urgency * 0.26 + density * 0.48 - order.priority * 4;
     if (score < bestScore || (score === bestScore && order.id < (selected?.id ?? Infinity))) {
       selected = order;
@@ -416,17 +427,18 @@ function average(results: BenchmarkResult[], field: keyof Pick<BenchmarkResult, 
 }
 
 export function runBenchmarkSuite(runCount = 100): BenchmarkSummary {
-  const strategies: ScaleStrategy[] = ['balanced', 'nearest', 'deadline', 'congestion'];
+  const strategies: ScaleStrategy[] = ['balanced', 'nearest', 'deadline', 'congestion', 'learned'];
   const scenarios: ScaleScenarioId[] = ['rush-demand', 'aisle-closure', 'high-congestion'];
   const results = strategies.flatMap((strategy) =>
     Array.from({ length: runCount }, (_, index) => runSeededExperiment(strategy, scenarios[index % scenarios.length], index + 1)),
   );
   const aggregate = (strategy: ScaleStrategy) => results.filter((result) => result.strategy === strategy);
   const congestion = aggregate('congestion');
+  const learned = aggregate('learned');
   const nearest = aggregate('nearest');
   const deadline = aggregate('deadline');
-  const completionLift = ((average(congestion, 'completedOrders') - average(nearest, 'completedOrders')) / Math.max(average(nearest, 'completedOrders'), 1)) * 100;
-  const p95Reduction = ((average(deadline, 'p95Latency') - average(congestion, 'p95Latency')) / Math.max(average(deadline, 'p95Latency'), 1)) * 100;
+  const completionLift = ((average(learned, 'completedOrders') - average(nearest, 'completedOrders')) / Math.max(average(nearest, 'completedOrders'), 1)) * 100;
+  const p95Reduction = ((average(deadline, 'p95Latency') - average(learned, 'p95Latency')) / Math.max(average(deadline, 'p95Latency'), 1)) * 100;
 
   return {
     runs: runCount,
@@ -435,9 +447,10 @@ export function runBenchmarkSuite(runCount = 100): BenchmarkSummary {
     zeroCollisionRuns: results.filter((result) => result.collisionCount === 0).length,
     recoveryRate: Math.round(average(congestion, 'recoveryRate') * 10) / 10,
     congestionCompletedOrders: Math.round(average(congestion, 'completedOrders') * 10) / 10,
+    learnedCompletedOrders: Math.round(average(learned, 'completedOrders') * 10) / 10,
     nearestCompletedOrders: Math.round(average(nearest, 'completedOrders') * 10) / 10,
     completionLift: Math.round(completionLift * 10) / 10,
-    congestionP95Latency: Math.round(average(congestion, 'p95Latency') * 10) / 10,
+    congestionP95Latency: Math.round(average(learned, 'p95Latency') * 10) / 10,
     deadlineP95Latency: Math.round(average(deadline, 'p95Latency') * 10) / 10,
     p95Reduction: Math.round(p95Reduction * 10) / 10,
     strategies: strategies.map((strategy) => {

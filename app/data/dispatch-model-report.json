@@ -1,0 +1,39 @@
+{
+  "algorithm": "Ridge-regression dispatch policy distillation",
+  "teacherPolicy": "Traffic-aware congestion heuristic",
+  "featureNames": [
+    "pickupDistance",
+    "dropDistance",
+    "localDemand",
+    "urgency",
+    "priority"
+  ],
+  "trainingExamples": 72000,
+  "holdoutExamples": 18000,
+  "holdoutMeanAbsoluteError": 0,
+  "holdoutRankingAgreement": 99.9,
+  "normalization": {
+    "mean": [
+      10.274652777777778,
+      10.188902777777777,
+      71.3801388888889,
+      59.31366666666667,
+      2.0020416666666665
+    ],
+    "std": [
+      4.484079462881778,
+      4.270427595880719,
+      50.61287325246177,
+      15.094045069348995,
+      0.7408581723904252
+    ]
+  },
+  "weights": [
+    2.2728444444444498,
+    1.8833133743777855,
+    2.476848005571555,
+    3.0367723950968597,
+    0.4528213521075215,
+    -5.1860072066484415
+  ]
+}

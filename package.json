@@ -12,7 +12,7 @@
     "lint": "oxlint app",
     "format": "oxfmt",
     "benchmark": "tsx scripts/run-benchmark.ts",
-    "train:model": "tsx scripts/train-policy-model.ts"
+    "train:dispatch": "tsx scripts/train-dispatch-model.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

@@ -24,12 +24,10 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import benchmarkReport from './data/benchmark-report.json';
-import policyModelReport from './data/policy-model-report.json';
-import { type PolicyFeatures } from './lib/policy-features';
-import { predictPolicies, type PolicyModelReport } from './lib/policy-model';
+import { dispatchModelReport, learnedDispatchScore } from './lib/dispatch-model';
 
 type Point = { x: number; y: number };
-type Strategy = 'balanced' | 'nearest' | 'deadline' | 'congestion';
+type Strategy = 'balanced' | 'nearest' | 'deadline' | 'congestion' | 'learned';
 type ScenarioId = 'baseline' | 'rush' | 'closure';
 type TaskStatus = 'queued' | 'assigned' | 'picked' | 'complete' | 'failed';
 type RobotStatus = 'idle' | 'to-pick' | 'to-drop' | 'waiting' | 'replanning';
@@ -280,6 +278,7 @@ function selectTask(robot: Robot, tasks: Task[], strategy: Strategy, tick: numbe
       const proximity = dist(robot.pos, task.pick);
       const urgency = Math.max(0, task.deadline - tick);
       const blockagePenalty = dynamicBlocks.filter((block) => dist(block, task.pick) <= 2).length * 5;
+      const localDemand = queued.filter((candidate) => dist(candidate.pick, task.pick) <= 2).length + blockagePenalty;
       const score =
         strategy === 'nearest'
           ? proximity
@@ -287,6 +286,14 @@ function selectTask(robot: Robot, tasks: Task[], strategy: Strategy, tick: numbe
             ? urgency * 0.9 + proximity * 0.35 - task.priority * 4
             : strategy === 'congestion'
               ? proximity * 0.8 + blockagePenalty + urgency * 0.15 - task.priority * 3
+              : strategy === 'learned'
+                ? learnedDispatchScore({
+                    pickupDistance: proximity,
+                    dropDistance: task.distance,
+                    localDemand,
+                    urgency,
+                    priority: task.priority,
+                  })
               : proximity * 0.6 + urgency * 0.3 - task.priority * 3;
       return { task, score };
     })
@@ -513,6 +520,7 @@ function strategyLabel(strategy: Strategy) {
     nearest: 'Nearest',
     deadline: 'Deadline',
     congestion: 'Congestion',
+    learned: 'Learned',
   }[strategy];
 }
 
@@ -524,40 +532,9 @@ function plannerExplanation(strategy: Strategy, state: SimState) {
     nearest: 'minimizes pickup distance for the next available robot.',
     deadline: 'prioritizes SLA risk before travel distance.',
     congestion: 'penalizes picks near blocked aisles before assigning work.',
+    learned: 'uses a distilled ridge model to score distance, demand, urgency, and priority.',
   }[strategy];
   return `${strategyLabel(strategy)} dispatch ${focus} ${active}/5 robots are active in the visual playback and ${blocked} aisle restrictions are in effect.`;
-}
-
-function buildPolicyFeatures(state: SimState, scenarioId: ScenarioId): PolicyFeatures {
-  const demandByCell = new Map<string, number>();
-  for (const task of state.tasks) {
-    if (task.status === 'complete' || task.status === 'failed') continue;
-    demandByCell.set(key(task.pick), (demandByCell.get(key(task.pick)) ?? 0) + 1);
-  }
-  const openTasks = state.tasks.filter((task) => task.status !== 'complete' && task.status !== 'failed');
-  const taskCount = Math.max(openTasks.length, 1);
-  const hotZoneShare = openTasks.filter((task) => task.pick.x >= 6 && task.pick.x <= 10 && task.pick.y >= 3 && task.pick.y <= 8).length / taskCount;
-
-  return {
-    rushDemand: scenarioId === 'rush' ? 1 : 0,
-    aisleClosure: scenarioId === 'closure' ? 1 : 0,
-    closureIntensity: Math.min(state.dynamicBlocks.length / 6, 1),
-    closureEarlyness: state.dynamicBlocks.length ? Math.max(0, 1 - state.tick / 110) : 0,
-    hotZoneShare,
-    urgentShare: openTasks.filter((task) => task.priority === 3).length / taskCount,
-    meanDeadlineSlack: openTasks.reduce((total, task) => total + Math.max(0, task.deadline - state.tick), 0) / taskCount / 100,
-    peakDemandShare: Math.max(0, ...demandByCell.values()) / taskCount,
-  };
-}
-
-function policySignals(features: PolicyFeatures) {
-  const signals = [];
-  if (features.rushDemand) signals.push('rush demand');
-  if (features.aisleClosure) signals.push('closure recovery');
-  if (features.closureIntensity >= 0.65) signals.push('dense aisle restrictions');
-  if (features.urgentShare >= 0.3) signals.push('urgent-order mix');
-  if (!signals.length) signals.push('steady flow');
-  return signals.join(' · ');
 }
 
 export default function Home() {
@@ -578,15 +555,10 @@ export default function Home() {
 
   const metrics = useMemo(() => summarize(state), [state]);
   const benchmarks = useMemo(
-    () => (['balanced', 'nearest', 'deadline', 'congestion'] as Strategy[]).map((option) => benchmarkScenario(scenarioId, option)),
+    () => (['balanced', 'nearest', 'deadline', 'congestion', 'learned'] as Strategy[]).map((option) => benchmarkScenario(scenarioId, option)),
     [scenarioId],
   );
   const scenario = scenarioFor(scenarioId);
-  const learnedFeatures = useMemo(() => buildPolicyFeatures(state, scenarioId), [state, scenarioId]);
-  const learnedPolicy = useMemo(
-    () => predictPolicies(policyModelReport as PolicyModelReport, learnedFeatures),
-    [learnedFeatures],
-  );
 
   const cells = useMemo(() => {
     const blocks = blockedSet(state.dynamicBlocks);
@@ -743,7 +715,7 @@ export default function Home() {
                 <p className="text-xs text-muted-foreground">5-robot visual playback · 16 x 12 grid · static racks plus dynamic blocked aisles</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                {(['balanced', 'nearest', 'deadline', 'congestion'] as Strategy[]).map((option) => (
+                {(['balanced', 'nearest', 'deadline', 'congestion', 'learned'] as Strategy[]).map((option) => (
                   <button
                     key={option}
                     className={`segmented ${strategy === option ? 'active' : ''}`}
@@ -819,11 +791,7 @@ export default function Home() {
               </p>
             </div>
 
-            <LearnedPolicyPanel
-              features={learnedFeatures}
-              prediction={learnedPolicy}
-              onApply={() => setStrategy(learnedPolicy.recommended.strategy)}
-            />
+            <LearnedDispatchPanel onApply={() => setStrategy('learned')} />
 
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-2">
@@ -931,6 +899,7 @@ function Evaluation({ benchmarks, scenario }: { benchmarks: ReturnType<typeof be
     nearest: FastForward,
     deadline: Zap,
     congestion: Bot,
+    learned: BrainCircuit,
   };
   return (
     <div className="panel overflow-hidden">
@@ -962,58 +931,42 @@ function Evaluation({ benchmarks, scenario }: { benchmarks: ReturnType<typeof be
   );
 }
 
-function LearnedPolicyPanel({
-  features,
-  prediction,
-  onApply,
-}: {
-  features: PolicyFeatures;
-  prediction: ReturnType<typeof predictPolicies>;
-  onApply: () => void;
-}) {
+function LearnedDispatchPanel({ onApply }: { onApply: () => void }) {
   return (
     <div className="panel p-4">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <BrainCircuit size={17} />
-          <h2 className="text-sm font-semibold">Learned policy scorer</h2>
+          <h2 className="text-sm font-semibold">Learned dispatch scorer</h2>
         </div>
-        <span className="state-pill replanning">Offline ML</span>
+        <span className="state-pill replanning">Supervised ML</span>
       </div>
       <p className="text-sm leading-6 text-muted-foreground">
-        Recommends <span className="font-semibold text-foreground">{strategyLabel(prediction.recommended.strategy)}</span> from {policySignals(features)}.
+        Distills the traffic-aware task-ranking policy from pickup distance, pack distance, local demand, urgency, and priority.
       </p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="rounded-md border border-border bg-secondary/50 px-3 py-2">
-          <p className="text-[10px] uppercase text-muted-foreground">Predicted utility</p>
-          <p className="mt-1 text-lg font-semibold">{prediction.recommended.score.toFixed(1)}</p>
+          <p className="text-[10px] uppercase text-muted-foreground">Training examples</p>
+          <p className="mt-1 text-lg font-semibold">{(dispatchModelReport.trainingExamples / 1000).toFixed(0)}K</p>
         </div>
         <div className="rounded-md border border-border bg-secondary/50 px-3 py-2">
-          <p className="text-[10px] uppercase text-muted-foreground">Top-two margin</p>
-          <p className="mt-1 text-lg font-semibold">+{prediction.margin.toFixed(1)}</p>
+          <p className="text-[10px] uppercase text-muted-foreground">Holdout fidelity</p>
+          <p className="mt-1 text-lg font-semibold">{dispatchModelReport.holdoutRankingAgreement}%</p>
         </div>
-      </div>
-      <div className="mt-3 grid gap-1.5">
-        {prediction.predictions.map((candidate) => (
-          <div key={candidate.strategy} className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{strategyLabel(candidate.strategy)}</span>
-            <span className={candidate.strategy === prediction.recommended.strategy ? 'font-semibold text-primary' : ''}>{candidate.score.toFixed(1)}</span>
-          </div>
-        ))}
       </div>
       <button className="control mt-3 w-full justify-center" onClick={onApply}>
         <Brain size={16} />
-        Apply recommendation
+        Use learned scorer
       </button>
       <p className="mt-3 text-xs leading-5 text-muted-foreground">
-        {policyModelReport.trainingEpisodes} training episodes · {policyModelReport.holdoutEpisodes} held-out episodes · regularized regression over demand, urgency, and closure features.
+        Learned dispatch completed {benchmarkReport.completionLift}% more orders than nearest-robot assignment across {benchmarkReport.runs} seeded bundles.
       </p>
     </div>
   );
 }
 
 function ScaleValidation() {
-  const collisionFreeRuns = benchmarkReport.runs * 4;
+  const collisionFreeRuns = benchmarkReport.runs * 5;
   return (
     <section className="panel overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
@@ -1021,13 +974,13 @@ function ScaleValidation() {
           <h2 className="text-sm font-semibold">Scale validation harness</h2>
           <p className="text-xs text-muted-foreground">Deterministic 50-robot / 500-order experiments, regenerated by the benchmark check</p>
         </div>
-        <span className="state-pill to-pick">100 seeded bundles</span>
+        <span className="state-pill to-pick">100 seeded bundles · 5 policies</span>
       </div>
       <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
         <ValidationMetric label="Scale envelope" value={`${benchmarkReport.robotCount} robots`} sub={`${benchmarkReport.orderCount}-order waves`} />
         <ValidationMetric label="Collision invariant" value={`${benchmarkReport.zeroCollisionRuns}/${collisionFreeRuns}`} sub="policy runs collision-free" />
         <ValidationMetric label="Disruption recovery" value={`${benchmarkReport.recoveryRate}%`} sub="rerouted within 10 ticks" />
-        <ValidationMetric label="Policy delta" value={`+${benchmarkReport.completionLift}%`} sub={`completion vs nearest · ${benchmarkReport.p95Reduction}% lower p95 vs deadline`} />
+        <ValidationMetric label="Learned policy delta" value={`+${benchmarkReport.completionLift}%`} sub={`completion vs nearest · ${benchmarkReport.p95Reduction}% lower p95 vs deadline`} />
       </div>
     </section>
   );
