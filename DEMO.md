@@ -30,3 +30,11 @@ The visual playback is deliberately small enough to read. The **Scale validation
 ## 4. Make it your own
 
 Type a goal such as `Generate 10 urgent orders for zone C` into the AI planning panel, then select **Convert goal to tasks**. The parser keeps that input deterministic by extracting only the batch size and urgency. You can also inject a single order, switch scenarios, change simulation speed, step one tick at a time, reset the run, or export the current state.
+
+## 5. Inspect a learned policy recommendation
+
+The **Learned policy scorer** is an offline supervised model trained from seeded simulator episodes. It takes the live workload's demand regime, closure pattern, urgency mix, deadline slack, and pick density, then ranks the four available dispatch policies by predicted utility. Use **Apply recommendation** to switch the visual playback to the top-ranked policy.
+
+![Learned policy scorer during a live warehouse run](./public/demo-learned-policy-scorer.jpg)
+
+The recommender does not control movement safety. BFS routing, reservations, collision avoidance, and replanning stay deterministic so the model is a measurable decision-support component rather than an opaque override.

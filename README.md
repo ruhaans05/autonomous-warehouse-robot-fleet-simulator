@@ -69,20 +69,35 @@ Current verified results:
 
 Those policy comparisons are called out separately on purpose: nearest-robot is the throughput baseline, while deadline-first is the latency baseline for this workload.
 
+## Learned policy scoring
+
+The simulator also includes an offline ML experiment that learns an expected utility score for each dispatch policy. It is trained from deterministic simulator rollouts, not from a canned recommendation list.
+
+```bash
+npm run train:model
+```
+
+The trainer creates 180 seeded warehouse episodes, holds out 36 of them, and fits a separate ridge-regression scorer for each policy. The state vector includes demand regime, aisle-closure intensity and timing, hot-zone concentration, urgent-order share, deadline slack, and peak pick density. Its target rewards completed orders while penalizing p95 latency and congestion.
+
+The checked-in model report lives in `app/data/policy-model-report.json`. In the app, the **Learned policy scorer** ranks all four policies from the current workload and can apply its recommendation. It is deliberately decision support only: BFS routing, move reservations, collision avoidance, and disruption recovery remain deterministic safety mechanisms.
+
 ## How it is organized
 
 ```text
 app/page.tsx                   Interactive control-plane UI
 app/lib/scale-benchmark.ts     Deterministic scale simulation and policy evaluator
 app/data/benchmark-report.json Checked-in result from the benchmark command
+app/lib/policy-model.ts        Client-side learned policy scoring
+app/data/policy-model-report.json Reproducible trained model artifact
 scripts/run-benchmark.ts       Regression gate and report generator
+scripts/train-policy-model.ts  Offline policy-model training and holdout check
 ```
 
 ## A few implementation notes
 
 The visual layer is not pretending to be a physics engine. It is a discrete-time fleet model. Robots move one cell per tick, plan paths with BFS, submit their next cell to a reservation pass, and yield when a move is not safe. The scale harness keeps the same discrete model but runs it at a workload that would be too noisy to inspect on a single 192-cell map.
 
-The natural-language task box is deliberately narrow. It turns a warehouse goal into a deterministic batch by extracting quantity and urgency; the routing and evaluation path remains inspectable and repeatable.
+The natural-language task box is deliberately narrow. It turns a warehouse goal into a deterministic batch by extracting quantity and urgency; the routing and evaluation path remains inspectable and repeatable. The learned policy scorer is a separate supervised-learning experiment with a checked-in model artifact and a holdout split.
 
 ## Stack
 
